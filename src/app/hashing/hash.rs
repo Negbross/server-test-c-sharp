@@ -5,6 +5,7 @@ use rand::rand_core::OsRng;
 use rand::TryRngCore;
 use sha3::digest::DynDigest;
 use sha3::Digest;
+use tokio::io::AsyncReadExt;
 
 enum FileDriver {
     Sha3_224,
@@ -104,14 +105,22 @@ pub fn hash_file(data: &[u8]) -> anyhow::Result<String> {
     Ok(hex::encode(result))
 }
 
-pub fn verify_file(expected_hex: &str, data: &[u8]) -> anyhow::Result<bool> {
-    let computed = hash_file(data)?;
-    Ok(computed.eq_ignore_ascii_case(expected_hex))
-}
+pub async fn verify_file_stream(expected_hex: &str, file_path: &str) -> anyhow::Result<bool> {
+    let mut file = tokio::fs::File::open(file_path).await?;
 
-pub async fn verify_hash_file(file_path: &str) -> anyhow::Result<bool> {
-    let hash_path = format!("{}.hash", file_path);
-    let expected_hash = tokio::fs::read_to_string(&hash_path).await?.trim().to_string();
-    let file_bytes = tokio::fs::read(file_path).await?;
-    verify_file(&expected_hash, &file_bytes)
+    let mut hasher: Box<dyn DynDigest> = match FileDriver::from_env() {
+        FileDriver::Sha3_224 => Box::new(sha3::Sha3_224::new()),
+
+        _ => { Box::new(sha3::Sha3_256::new()) }
+    };
+
+    let mut buffer = [0u8; 8192];
+    loop {
+        let n = file.read(&mut buffer).await?;
+        if n == 0 { break; }
+        hasher.update(&buffer[..n]);
+    }
+
+    let computed = hex::decode(expected_hex)?;
+    Ok(computed.eq_ignore_ascii_case(&buffer))
 }

@@ -14,12 +14,17 @@ impl ProductService {
 
     pub async fn create_product(&self, payload: CreateProductPayload ) -> Result<Product, AppError>
     {
+        match self.repo.find_by_slug(&payload.slug).await {
+            Ok(Some(_)) => return Err(AppError::DuplicateEntry("Product with this slug already exists".to_string())),
+            Ok(None) => {},
+            Err(e) => return Err(e),
+        }
         self.repo.create(payload).await
     }
 
     pub async fn get_all_products(&self) -> Result<Vec<Product>, AppError>
     {
-        self.repo.find_all().await
+        self.repo.list().await
     }
 
     pub async fn get_product_by_slug(&self, slug: &str) -> Result<Product, AppError>

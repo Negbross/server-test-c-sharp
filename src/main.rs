@@ -8,11 +8,11 @@ use tracing::log::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod app;
-mod respons;
 mod routes;
 mod utils;
 mod core;
 mod config;
+mod mock;
 
 #[tokio::main]
 async fn main() {

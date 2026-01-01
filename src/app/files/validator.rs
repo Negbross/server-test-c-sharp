@@ -1,5 +1,6 @@
 use std::path::Path;
-use slug::slugify;
+
+use crate::utils::slugify;
 
 /// Max chunk 2 MB
 pub const MAX_CHUNK_SIZE: u64 = 2 * 1024 * 1024;
@@ -84,22 +85,18 @@ pub fn path_is_valid(path: &str) -> bool {
         | std::path::Component::RootDir
     ))
 
-    // let path = Path::new(path);
-    // let mut components = path.components().peekable();
-    //
-    // if let Some(first) = components.peek() {
-    //     if !matches!(first, std::path::Component::Normal(_)) {
-    //         return false;
-    //     }
-    // }
-    //
-    // components.count() == 1
 }
 
 /// Check if upload complete
-fn is_upload_complete(temp_dir: &str, total_chunks: usize) -> bool {
-    match std::fs::read_dir(temp_dir) {
-        Ok(entries) => entries.count() == total_chunks,
+pub async fn is_upload_complete(temp_dir: &str, total_chunks: usize) -> bool {
+    match tokio::fs::read_dir(temp_dir).await {
+        Ok(mut entries) => {
+            let mut count = 0;
+            while let Ok(Some(_)) = entries.next_entry().await {
+                count += 1;
+            }
+            count == total_chunks
+        },
         Err(_) => false,
     }
 }

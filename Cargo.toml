@@ -1,7 +1,12 @@
 [package]
-name = "erp-backend"
+name = "server-test-c-sharp"
 version = "0.1.0"
 edition = "2021"
+default-run = "server-test-c-sharp"
+
+[lib]
+name = "server_test_csharp"
+path = "src/lib.rs"
 
 [workspace]
 members = ["entity"]
@@ -13,10 +18,8 @@ entity = { path = "entity" }
 axum = { version = "0.8.1", features = ["tokio", "tracing", "macros", "multipart"] }
 infer = "0.19.0"
 tokio = { version = "1.43.0", features = ["full"]}
-tower = {version = "0.5.2", features = ["full"]}
 tower-http = { version = "0.6.2", features = ["tracing", "trace", "cors", "limit"] }
 chrono = { version = "0.4.41" }
-slug = { version = "0.1.6"  }
 tracing = { version = "0.1.41", features = ["log"] }
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "registry"] }
 dotenvy = "0.15.7"
@@ -25,9 +28,12 @@ serde_json = "1.0.140"
 sea-orm = { version = "1.1.10", features = ["sqlx-postgres", "runtime-tokio", "macros", "with-uuid", "with-chrono"] }
 anyhow = "1.0.98"
 uuid = { version = "1.17.0", features = ["v4"] }
-jsonwebtoken = "9.3.1"
+jsonwebtoken = { version = "10.2.0", features = ["rust_crypto"] }
 async-trait = "0.1.88"
 validator = { version = "0.20.0", features = ["derive"] }
+
+utoipa = { version = "5.4.0", features = ["axum_extras", "uuid", "chrono", "decimal"] }
+utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
 
 bcrypt = "0.17.0"
 rand = { version = "0.9.1", features = ["thread_rng", "std"] }
@@ -35,4 +41,6 @@ argon2 = { version = "0.5.3", features = ["std", "rand"] }
 sha3 = "0.10.8"
 hex = "0.4.3"
 regex = "1.11.1"
-axum-extra = { version = "0.10.1", features = ["typed-header"] }
+axum-extra = { version = "0.12.5", features = ["typed-header"] }
+rust_decimal = "1.39.0"
+rust_decimal_macros = "1.39.0"

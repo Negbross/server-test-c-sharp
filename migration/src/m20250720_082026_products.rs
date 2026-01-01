@@ -19,13 +19,13 @@ impl MigrationTrait for Migration {
                     .col(uuid(Products::UserId))
                     .col(string_uniq(Products::Slug))
                     .col(text(Products::Description))
-                    .col(big_unsigned(Products::Price))
+                    .col(decimal_len(Products::Price, 19, 4))
                     .col(big_unsigned(Products::Quantity))
-                    .col(timestamp_with_time_zone(Products::CreatedAt)
+                    .col(timestamp(Products::CreatedAt)
                         .default(Expr::current_timestamp()
                         ))
-                    .col(timestamp_with_time_zone_null(Products::UpdatedAt))
-                    .col(timestamp_with_time_zone_null(Products::PublishedAt))
+                    .col(timestamp_null(Products::UpdatedAt))
+                    .col(timestamp_null(Products::PublishedAt))
                     .to_owned(),
             )
             .await?;

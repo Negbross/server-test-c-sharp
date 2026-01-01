@@ -1,35 +1,166 @@
-POST http://localhost:8000/product/create
-Content-Type: application/json
+@baseUrl = http://localhost:8000
 
+@adminUsername = superadmin
+@adminPassword = 12345678
+@userUsername = dvoi84
+@userPassword = 12345678
+
+################################################################
+# HEALTHCHECK / SANITY CHECK
+################################################################
+
+### Healthcheck
+GET {{baseUrl}}/
+Accept: application/json
+
+################################################################
+# AUTH: REGISTER & LOGIN
+################################################################
+
+### Register user baru
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+Accept: application/json
 
 {
-  "sku": "12332344",
-  "name": "Garam ruqyah",
+  "username": "{{userUsername}}",
+  "name": "Divo Prapandita",
+  "email": "divo@example.com",
+  "password": "{{userPassword}}"
+}
+
+### Register superadmin
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+Accept: application/json
+
+{
+  "username": "{{adminUsername}}",
+  "name": "Super Admin",
+  "email": "superadmin@example.com",
+  "password": "{{adminPassword}}"
+}
+
+> {%
+    client.log(response.body)
+    client.global.set("admin_token", response.body.token)
+%}
+
+### Login sebagai ADMIN
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+Accept: application/json
+
+{
+  "identifier": "{{adminUsername}}",
+  "password": "{{adminPassword}}"
+}
+
+> {%
+    client.global.set("admin_token", response.body);
+%}
+
+### Login sebagai USER biasa
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+Accept: application/json
+
+{
+  "identifier": "{{userUsername}}",
+  "password": "{{userPassword}}"
+}
+
+> {%
+    client.log(response.body)
+    client.global.set("user_token", response.body)
+%}
+
+################################################################
+# USER PROFILE
+################################################################
+
+### Get current user info (pakai token user)
+GET {{baseUrl}}/user/
+Accept: application/json
+Authorization: Bearer {{user_token}}
+
+### Get current user info (pakai token admin)
+GET {{baseUrl}}/user/
+Accept: application/json
+Authorization: Bearer {{admin_token}}
+
+################################################################
+# PRODUCTS
+################################################################
+
+### Create product
+POST {{baseUrl}}/products/
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{admin_token}}
+
+{
+  "sku": "PRD-001",
+  "name": "Garam Ruqyah",
   "description": "Garam yang membuat rejeki lancar",
   "price": 12000,
   "quantity": 10
 }
 
-###
-GET http://localhost:8000/product
+### Get all products
+GET {{baseUrl}}/products/
 Accept: application/json
 
-###
-POST http://localhost:8000/register
+### Get product by slug
+GET {{baseUrl}}/products/garam-ruqyah
+Accept: application/json
+
+### Update product by slug
+PUT {{baseUrl}}/products/garam-ruqyah
 Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{admin_token}}
 
 {
-  "name": "divo prapandita",
-  "username": "dvoi84",
-  "email": "divo@example.com",
-  "password": "12345678"
+  "name": "Garam Ruqyah Premium",
+  "description": "Garam premium berkualitas tinggi",
+  "price": 15000,
+  "quantity": 25
 }
 
-###
-POST http://localhost:8000/login
+### Delete product by slug
+DELETE {{baseUrl}}/products/garam-ruqyah
+Accept: application/json
+Authorization: Bearer {{admin_token}}
+
+################################################################
+# API DOCUMENTATION
+################################################################
+
+### Swagger UI (buka di browser)
+# http://localhost:8080/api-docs
+
+### OpenAPI JSON
+GET {{baseUrl}}/api-docs/openapi.json
+Accept: application/json
+
+################################################################
+# NEGATIVE TESTING (cek auth)
+################################################################
+
+### Coba akses endpoint user TANPA token (must be Unauthorized)
+GET {{baseUrl}}/user/
+Accept: application/json
+
+### Coba create product TANPA token
+POST {{baseUrl}}/products/
 Content-Type: application/json
+Accept: application/json
 
 {
-  "identifier": "dvoi84",
-  "password": "12345678"
+  "sku": "PRD-999",
+  "name": "Should Fail",
+  "description": "Harusnya 401/403",
+  "price": 1,
+  "quantity": 1
 }

@@ -7,14 +7,13 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use sha3::{Digest, Sha3_256};
-use slug::slugify;
 use tokio::fs;
 use tokio::fs::OpenOptions;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::info;
-use crate::app::files::validator::{path_is_valid, sanitize_filename};
+use uuid::Uuid;
+use crate::app::files::validator::{is_upload_complete, path_is_valid, sanitize_filename, validate_book_mime, MAX_UPLOAD_SIZE};
 use crate::app::hashing::hash::hash_file;
-use crate::routes::{internal_error, not_found_error};
 
 #[derive(Deserialize)]
 struct DownloadParams {
@@ -89,22 +88,57 @@ pub fn path_storage(sub_path: &str) -> PathBuf {
 }
 
 /// Write a file as chunks
-pub async fn write_file(path: &str, file_name: &str, total_chunks: usize, output_out: Option<&str>)
-    -> Result<(String, String), (StatusCode, String)>
+pub async fn write_file(
+    upload_id: Uuid,
+    file_name: &str,
+    total_chunks: usize,
+    output_dir: Option<&str>,
+    chunk_number: usize,
+    data_chunks: &[u8]
+)
+    -> Result<String, (StatusCode, String)>
 {
-    if !path_is_valid(path) {
-        info!("{:?}", path);
-        return Err((StatusCode::NO_CONTENT, "Invalid path".to_owned()));
+    if (total_chunks as u64 * 2 * 1024 * 1024) > MAX_UPLOAD_SIZE {
+        return Err((StatusCode::PAYLOAD_TOO_LARGE, "File exceeds limit".to_string()))
     }
+    // if !path_is_valid(path) {
+    //     info!("{:?}", path);
+    //     return Err((StatusCode::NO_CONTENT, "Invalid path".to_owned()));
+    // }
+
+    let temp_dir_str = format!("temp/{}", upload_id);
+    let temp_dir_path = path_storage(&temp_dir_str);
+
+    if let Some(_parent) = temp_dir_path.parent() {
+        fs::create_dir_all(&temp_dir_path).await.map_err(|e|
+            (StatusCode::INTERNAL_SERVER_ERROR, format!("Gagal buat temp dir: {}", e))
+        )?;
+    }
+
+    if chunk_number == 0 {
+        if let Err(e) = validate_book_mime(data_chunks) {
+            return Err((StatusCode::UNSUPPORTED_MEDIA_TYPE, e));
+        }
+    }
+
+    let chunk_path = temp_dir_path.join(chunk_number.to_string());
+    fs::write(&chunk_path, data_chunks).await.map_err(|e|
+        (StatusCode::INTERNAL_SERVER_ERROR, format!("Gagal buat chunk: {}", e))
+    )?;
+
+    let is_complete = is_upload_complete(&temp_dir_path.to_str().unwrap(), total_chunks).await;
+    if !is_complete {
+        return Ok(format!("Chunk {} stored. Waiting for more...", chunk_number));
+    }
+
+    info!("Upload lengkap! Mulai menggabungkan file...");
 
     let timestamp = chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
     let sanitized_name = sanitize_filename(&file_name);
     let final_file_name = format!("{}_{}", &timestamp, sanitized_name);
 
-    // let output_dir = Path::new(path).parent()
-    //     .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "Invalid chunk directory structure".to_string()))?; // keluar dari folder chunk
-    // let output_file_name = output_dir.join(file_name).as_path().to_str().unwrap().to_string();
-    let relative_path = match output_out {
+
+    let relative_path = match output_dir {
         Some(subdir) => format!("uploads/{}/{}", subdir, final_file_name),
         None => format!("uploads/{}", final_file_name)
     };
@@ -124,45 +158,39 @@ pub async fn write_file(path: &str, file_name: &str, total_chunks: usize, output
         .open(&output_path).await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{:?}", e)))?;
 
-    for chunk_number in 0..total_chunks {
+    let mut hasher = Sha3_256::new();
+    for i in 0..total_chunks {
         // let ck_path = format!("{}/chunk/{}", path, chunk_number);
-        let ck_path = format!("{}/{}", path, chunk_number);
-        let chunk_path = path_storage(&ck_path);
-        let chunk_data = fs::read(&chunk_path)
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to read chunk {}: {}", chunk_number, e)))?;
-        output_file.write_all(&chunk_data)
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to write chunk {}: {}", chunk_number, e)))?;
+        let current_chunk_path = temp_dir_path.join(i.to_string());
+
+        // Buka Chunk
+        let mut chunk_file = fs::File::open(&current_chunk_path).await
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, format!("Chunk {} hilang!", i)))?;
+
+        // Baca Chunk
+        let mut buffer = Vec::new();
+        chunk_file.read_to_end(&mut buffer).await.unwrap();
+
+        // Tulis ke Final File
+        output_file.write_all(&buffer).await.unwrap();
+
+        // Update Hash
+        hasher.update(&buffer);
+
+        fs::remove_dir(current_chunk_path.as_path()).await.unwrap();
     }
+    let hash_result = hex::encode(hasher.finalize());
+    let hash_path = output_path.with_extension("hash");
+    fs::write(&hash_path, hash_result.as_bytes()).await.unwrap();
+    fs::remove_dir_all(&temp_dir_path).await.map_err(|e|
+        (StatusCode::INTERNAL_SERVER_ERROR, format!("Gagal cleanup temp: {}", e))
+    )?;
 
-    info!("{:?}", output_path);
-    info!("Entering hashes mode");
-    let file_bytes = fs::read(&output_path).await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to read file: {}", e)))?;
-
-    let hash = hash_file(&file_bytes)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to hash file: {}", e)))?;
-
-    info!("Entering hashes directory");
-    let hash_file_path = output_path.with_extension("hash");
-
-    fs::write(&hash_file_path, hash.as_bytes()).await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to write hash file: {}", e)))?;
-
-    fs::remove_dir_all(path_storage(path))
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to remove directory: {}", e)))?;
-    Ok((relative_path, hash))
+    Ok(format!("File berhasil dibuat: {} (Hash: {})", relative_path, hash_result))
 
 }
 
-/// Generate unique hash for directory
-pub fn generate_chunk_dir_id(title: &str, publisher: &str, filename: &str) -> String {
-    let mut hasher = Sha3_256::new();
-    hasher.update(&title);
-    hasher.update(&publisher);
-    hasher.update(&filename);
-    let hash = hasher.finalize();
-    hex::encode(&hash[..8])
+/// Generate unique id for directory
+pub fn generate_chunk_dir_id() -> String {
+    Uuid::new_v4().to_string()
 }
